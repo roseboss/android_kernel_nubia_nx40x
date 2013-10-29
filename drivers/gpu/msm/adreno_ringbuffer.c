@@ -536,7 +536,6 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	unsigned int rcmd_gpu;
 	unsigned int context_id = KGSL_MEMSTORE_GLOBAL;
 	unsigned int gpuaddr = rb->device->memstore.gpuaddr;
-
 	/*
 	 * if the context was not created with per context timestamp
 	 * support, we must use the global timestamp since issueibcmds
@@ -571,6 +570,9 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	if (adreno_is_a3xx(adreno_dev))
 		total_sizedwords += 7;
 
+	if (adreno_is_a2xx(adreno_dev))
+		total_sizedwords += 2; /* CP_WAIT_FOR_IDLE */
+
 	total_sizedwords += 2; /* scratchpad ts for fault tolerance */
 	if (context && context->flags & CTXT_FLAGS_PER_CONTEXT_TS &&
 			!(flags & KGSL_CMD_FLAGS_INTERNAL_ISSUE)) {
@@ -581,6 +583,13 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 	} else {
 		total_sizedwords += 4; /* global timestamp for fault tolerance*/
 	}
+
+	if (flags & KGSL_CMD_FLAGS_EOF)
+		total_sizedwords += 2;
+
+	/* Add space for the power on shader fixup if we need it */
+	if (flags & KGSL_CMD_FLAGS_PWRON_FIXUP)
+		total_sizedwords += 5;
 
 	ringcmds = adreno_ringbuffer_allocspace(rb, context, total_sizedwords);
 	if (!ringcmds) {
@@ -593,6 +602,18 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 
 	rcmd_gpu = rb->buffer_desc.gpuaddr
 		+ sizeof(uint)*(rb->wptr-total_sizedwords);
+
+	if (flags & KGSL_CMD_FLAGS_PWRON_FIXUP) {
+		GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_nop_packet(1));
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+				KGSL_PWRON_FIXUP_IDENTIFIER);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			CP_HDR_INDIRECT_BUFFER_PFD);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			adreno_dev->pwron_fixup.gpuaddr);
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			adreno_dev->pwron_fixup_dwords);
+	}
 
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_nop_packet(1));
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, KGSL_CMD_IDENTIFIER);
@@ -630,6 +651,16 @@ adreno_ringbuffer_addcmds(struct adreno_ringbuffer *rb,
 			rb->timestamp[context_id]++;
 	}
 	timestamp = rb->timestamp[context_id];
+
+	/* HW Workaround for MMU Page fault
+	* due to memory getting free early before
+	* GPU completes it.
+	*/
+	if (adreno_is_a2xx(adreno_dev)) {
+		GSL_RB_WRITE(ringcmds, rcmd_gpu,
+			cp_type3_packet(CP_WAIT_FOR_IDLE, 1));
+		GSL_RB_WRITE(ringcmds, rcmd_gpu, 0x00);
+	}
 
 	/* scratchpad ts for fault tolerance */
 	GSL_RB_WRITE(ringcmds, rcmd_gpu, cp_type0_packet(REG_CP_TIMESTAMP, 1));
@@ -965,6 +996,7 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 	unsigned int i;
 	struct adreno_context *drawctxt;
 	unsigned int start_index = 0;
+	int ret = 0;
 
 	if (device->state & KGSL_STATE_HUNG)
 		return -EBUSY;
@@ -1021,9 +1053,15 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 		if (unlikely(adreno_dev->ib_check_level >= 1 &&
 		    !_parse_ibs(dev_priv, ibdesc[i].gpuaddr,
 				ibdesc[i].sizedwords))) {
-			kfree(link);
-			return -EINVAL;
+			ret = -EINVAL;
+			goto done;
 		}
+
+		if (ibdesc[i].sizedwords == 0) {
+			ret = -EINVAL;
+			goto done;
+		}
+
 		*cmds++ = CP_HDR_INDIRECT_BUFFER_PFD;
 		*cmds++ = ibdesc[i].gpuaddr;
 		*cmds++ = ibdesc[i].sizedwords;
@@ -1038,15 +1076,25 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 
 	adreno_drawctxt_switch(adreno_dev, drawctxt, flags);
 
+	flags &= KGSL_CMD_FLAGS_EOF;
+
+	/*
+	 * For some targets, we need to execute a dummy shader operation after a
+	 * power collapse
+	 */
+
+	if (test_and_clear_bit(ADRENO_DEVICE_PWRON, &adreno_dev->priv) &&
+	    test_bit(ADRENO_DEVICE_PWRON_FIXUP, &adreno_dev->priv))
+		flags |= KGSL_CMD_FLAGS_PWRON_FIXUP;
+
 	*timestamp = adreno_ringbuffer_addcmds(&adreno_dev->ringbuffer,
 					drawctxt,
-					(flags & KGSL_CMD_FLAGS_EOF),
+					flags,
 					&link[0], (cmds - link), *timestamp);
 
 	KGSL_CMD_INFO(device, "ctxt %d g %08x numibs %d ts %d\n",
 		context->id, (unsigned int)ibdesc, numibs, *timestamp);
 
-	kfree(link);
 
 #ifdef CONFIG_MSM_KGSL_CFF_DUMP
 	/*
@@ -1063,9 +1111,12 @@ adreno_ringbuffer_issueibcmds(struct kgsl_device_private *dev_priv,
 	 */
 	if (drawctxt->flags & CTXT_FLAGS_GPU_HANG_FT) {
 		drawctxt->flags &= ~CTXT_FLAGS_GPU_HANG_FT;
-		return -EPROTO;
-	} else
-		return 0;
+		ret = -EPROTO;
+	}
+
+done:
+	kfree(link);
+	return ret;
 }
 
 static void _turn_preamble_on_for_ib_seq(struct adreno_ringbuffer *rb,
