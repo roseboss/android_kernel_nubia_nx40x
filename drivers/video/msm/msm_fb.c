@@ -53,16 +53,9 @@
 #include "mdp.h"
 #include "mdp4.h"
 
-//#define CONFIG_ZTEMT_LCD_CMD_MODE
-
 #ifdef CONFIG_FB_MSM_TRIPLE_BUFFER
 #define MSM_FB_NUM	3
 #endif
-
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-static atomic_t zte_lcd_suspend = ATOMIC_INIT(0);
-#endif
-
 
 static unsigned char *fbram;
 static unsigned char *fbram_phys;
@@ -961,13 +954,7 @@ void msm_fb_set_backlight(struct msm_fb_data_type *mfd, __u32 bkl_lvl)
 			return;
 		}
 		mfd->bl_level = temp;
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-		if (!atomic_read(&zte_lcd_suspend)){
-#endif
 		pdata->set_backlight(mfd);
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-		}
-#endif
 		mfd->bl_level = bkl_lvl;
 		bl_level_old = temp;
 	}
@@ -989,16 +976,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 	switch (blank_mode) {
 	case FB_BLANK_UNBLANK:
 		if (!mfd->panel_power_on) {
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	down(&mfd->sem);
-#endif
 			ret = pdata->on(mfd->pdev);
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	up(&mfd->sem);
-#endif
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	atomic_set(&zte_lcd_suspend, 0);
-#endif
 			if (ret == 0) {
 				down(&mfd->sem);
 				mfd->panel_power_on = TRUE;
@@ -1034,15 +1012,7 @@ static int msm_fb_blank_sub(int blank_mode, struct fb_info *info,
 				memset((void *)info->screen_base, 0,
 				       info->fix.smem_len);
 
-
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	atomic_set(&zte_lcd_suspend, 1);
-	down(&mfd->sem);
-#endif
 			ret = pdata->off(mfd->pdev);
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	up(&mfd->sem);
-#endif
 			if (ret)
 				mfd->panel_power_on = curr_pwr_state;
 
@@ -1971,9 +1941,6 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 	struct fb_var_screeninfo *var = &disp_commit->var;
 	u32 wait_for_finish = disp_commit->wait_for_finish;
 	int ret = 0;
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	struct msm_fb_panel_data *pdata;	
-#endif
 
 	if (disp_commit->flags &
 		MDP_DISPLAY_COMMIT_OVERLAY) {
@@ -2022,26 +1989,6 @@ static int msm_fb_pan_display_ex(struct fb_info *info,
 	mfd->is_committing = 1;
 	INIT_COMPLETION(mfd->commit_comp);
 	schedule_work(&mfd->commit_work);
-	
-#ifdef CONFIG_ZTEMT_LCD_CMD_MODE
-	if (unset_bl_level && !bl_updated) {
-		pdata = (struct msm_fb_panel_data *)mfd->pdev->
-			dev.platform_data;
-		if ((pdata) && (pdata->set_backlight)) {
-			down(&mfd->sem);
-			mfd->bl_level = unset_bl_level;
-		if (!atomic_read(&zte_lcd_suspend)){
-			
-			pdata->set_backlight(mfd);
-			
-		}
-			bl_level_old = unset_bl_level;
-			up(&mfd->sem);
-			bl_updated = 1;
-		}
-	}
-#endif	
-
 	mutex_unlock(&mfd->sync_mutex);
 	if (wait_for_finish)
 		msm_fb_pan_idle(mfd);
