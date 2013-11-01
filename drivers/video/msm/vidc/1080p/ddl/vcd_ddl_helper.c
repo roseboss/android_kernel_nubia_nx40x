@@ -505,8 +505,6 @@ u32 ddl_get_yuv_buf_size(u32 width, u32 height, u32 format)
 
 	width_round_up  = width;
 	height_round_up = height;
-	align = SZ_4K;
-
 	if (format == DDL_YUV_BUF_TYPE_TILE) {
 		width_round_up  = DDL_ALIGN(width, DDL_TILE_ALIGN_WIDTH);
 		height_round_up = DDL_ALIGN(height, DDL_TILE_ALIGN_HEIGHT);
@@ -820,13 +818,13 @@ u32 ddl_calc_enc_hw_buffers_size(enum vcd_codec codec, u32 width,
 		height, DDL_YUV_BUF_TYPE_TILE);
 	sz_dpb_c = ddl_get_yuv_buf_size(width, height>>1,
 		DDL_YUV_BUF_TYPE_TILE);
-	if ((input_format == VCD_BUFFER_FORMAT_NV12_16M2KA) ||
-		(input_format == VCD_BUFFER_FORMAT_NV21_16M2KA)) {
+	if (input_format ==
+		VCD_BUFFER_FORMAT_NV12_16M2KA) {
 		sz_cur_y = ddl_get_yuv_buf_size(width, height,
 			DDL_YUV_BUF_TYPE_LINEAR);
 		sz_cur_c = ddl_get_yuv_buf_size(width, height>>1,
 			DDL_YUV_BUF_TYPE_LINEAR);
-	} else if (input_format == VCD_BUFFER_FORMAT_TILE_4x2) {
+	} else if (VCD_BUFFER_FORMAT_TILE_4x2 == input_format) {
 		sz_cur_y = sz_dpb_y;
 		sz_cur_c = sz_dpb_c;
 	} else
@@ -1007,7 +1005,7 @@ void ddl_decoder_chroma_dpb_change(struct ddl_client_context *ddl)
 	u32 luma_size, i, dpb;
 	luma_size = decoder->dpb_buf_size.size_y;
 	dpb = decoder->dp_buf.no_of_dec_pic_buf;
-	DDL_MSG_HIGH("%s Decoder num DPB buffers = %u Luma Size = %u"
+	DDL_MSG_HIGH("%s Decoder num DPB buffers = %u Luma Size = %u",
 			 __func__, dpb, luma_size);
 	if (dpb > DDL_MAX_BUFFER_COUNT)
 		dpb = DDL_MAX_BUFFER_COUNT;

@@ -60,7 +60,8 @@
 #define VCD_I_SET_EXT_METABUFFER (VCD_START_BASE + 0x2C)
 #define VCD_I_FREE_EXT_METABUFFER (VCD_START_BASE + 0x2D)
 #define VCD_I_ENABLE_SEC_METADATA (VCD_START_BASE + 0x2E)
-
+#define VCD_I_ENABLE_VUI_BITSTREAM_RESTRICT_FLAG (VCD_START_BASE + 0x2F)
+#define VCD_I_GET_CURR_PERF_LEVEL (VCD_START_BASE + 0x30)
 
 #define VCD_START_REQ      (VCD_START_BASE + 0x1000)
 #define VCD_I_REQ_IFRAME   (VCD_START_REQ + 0x1)
@@ -151,8 +152,7 @@ enum vcd_yuv_buffer_format {
 	VCD_BUFFER_FORMAT_NV12      = 0x1,
 	VCD_BUFFER_FORMAT_TILE_4x2    = 0x2,
 	VCD_BUFFER_FORMAT_NV12_16M2KA = 0x3,
-	VCD_BUFFER_FORMAT_TILE_1x1    = 0x4,
-	VCD_BUFFER_FORMAT_NV21_16M2KA = 0x5
+	VCD_BUFFER_FORMAT_TILE_1x1    = 0x4
 };
 
 struct vcd_property_buffer_format {
@@ -403,5 +403,9 @@ struct vcd_property_meta_buffer {
 	int pmem_fd_iommu;
 	u8 *dev_addr_iommu;
 	void *client_data_iommu;
+};
+
+struct vcd_property_bitstream_restrict_enable {
+	u32 bitstream_restrict_enable_flag;
 };
 #endif

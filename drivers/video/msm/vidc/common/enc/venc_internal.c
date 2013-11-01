@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2013, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2012, Code Aurora Forum. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -123,10 +123,6 @@ u32 vid_enc_set_get_inputformat(struct video_client_ctx *client_ctx,
 			format.buffer_format =
 				VCD_BUFFER_FORMAT_NV12_16M2KA;
 			break;
-		case VEN_INPUTFMT_NV21_16M2KA:
-			format.buffer_format =
-				VCD_BUFFER_FORMAT_NV21_16M2KA;
-			break;
 		default:
 			status = false;
 			break;
@@ -155,9 +151,6 @@ u32 vid_enc_set_get_inputformat(struct video_client_ctx *client_ctx,
 				break;
 			case VCD_BUFFER_FORMAT_TILE_4x2:
 				*input_format = VEN_INPUTFMT_NV21;
-				break;
-			case VCD_BUFFER_FORMAT_NV21_16M2KA:
-				*input_format = VEN_INPUTFMT_NV21_16M2KA;
 				break;
 			default:
 				status = false;
@@ -1890,7 +1883,7 @@ u32 vid_enc_set_recon_buffers(struct video_client_ctx *client_ctx,
 					VIDEO_DOMAIN,
 					VIDEO_MAIN_POOL,
 					SZ_4K,
-					control->buffer_size * 2,
+					0,
 					(unsigned long *)&iova,
 					(unsigned long *)&buffer_size,
 					0, 0);
@@ -2021,4 +2014,28 @@ u32 vid_enc_get_recon_buffer_size(struct video_client_ctx *client_ctx,
 				__func__, vcd_status);
 			return false;
 		}
+}
+
+u32 vid_enc_get_curr_perf_level(struct video_client_ctx *client_ctx,
+		u32 *curr_perf_level)
+{
+	struct vcd_property_hdr vcd_property_hdr;
+	u32 vcd_status = VCD_ERR_FAIL;
+	u32 curr_perf_lvl = 0;
+
+	if (!client_ctx)
+		return false;
+
+	vcd_property_hdr.prop_id = VCD_I_GET_CURR_PERF_LEVEL;
+	vcd_property_hdr.sz = sizeof(u32);
+	vcd_status = vcd_get_property(client_ctx->vcd_handle,
+					&vcd_property_hdr, &curr_perf_lvl);
+	if (vcd_status) {
+		ERR("VCD_I_GET_PERF_LEVEL failed!!");
+		*curr_perf_level = 0;
+		return false;
+	} else {
+		*curr_perf_level = curr_perf_lvl;
+		return true;
+	}
 }

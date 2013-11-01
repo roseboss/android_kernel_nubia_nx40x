@@ -45,6 +45,7 @@ void *ddl_pmem_alloc(struct ddl_buf_addr *addr, size_t sz, u32 alignment)
 	unsigned long iova = 0;
 	unsigned long buffer_size = 0;
 	unsigned long *kernel_vaddr = NULL;
+	unsigned long ionflag = 0;
 	unsigned long flags = 0;
 	int ret = 0;
 	ion_phys_addr_t phyaddr = 0;
@@ -70,12 +71,17 @@ void *ddl_pmem_alloc(struct ddl_buf_addr *addr, size_t sz, u32 alignment)
 		alloc_size = (alloc_size+4095) & ~4095;
 		addr->alloc_handle = ion_alloc(
 		ddl_context->video_ion_client, alloc_size, SZ_4K,
-			res_trk_get_mem_type(), res_trk_get_ion_flags());
+			res_trk_get_mem_type(), 0);
 		if (IS_ERR_OR_NULL(addr->alloc_handle)) {
 			DDL_MSG_ERROR("%s() :DDL ION alloc failed\n",
 						 __func__);
 			goto bail_out;
 		}
+		if (res_trk_check_for_sec_session() ||
+			addr->mem_type == DDL_FW_MEM)
+			ionflag = 0;
+		else
+			ionflag = ION_FLAG_CACHED;
 		kernel_vaddr = (unsigned long *) ion_map_kernel(
 					ddl_context->video_ion_client,
 					addr->alloc_handle);

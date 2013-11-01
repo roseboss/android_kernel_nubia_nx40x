@@ -515,6 +515,7 @@ static u32 ddl_set_dec_property(struct ddl_client_context *ddl,
 	}
 	break;
 	case VCD_REQ_PERF_LEVEL:
+		DDL_MSG_LOW("%s: VCD_REQ_PERF_LEVEL (do nithing)", __func__);
 		vcd_status = VCD_S_SUCCESS;
 		break;
 	default:
@@ -911,10 +912,8 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 			property_hdr->sz &&
 			((buffer_format->buffer_format ==
 			VCD_BUFFER_FORMAT_NV12_16M2KA) ||
-			(buffer_format->buffer_format ==
-			VCD_BUFFER_FORMAT_TILE_4x2) ||
-			(buffer_format->buffer_format ==
-			VCD_BUFFER_FORMAT_NV21_16M2KA))) {
+			(VCD_BUFFER_FORMAT_TILE_4x2 ==
+			buffer_format->buffer_format))) {
 			if (buffer_format->buffer_format !=
 				encoder->buf_format.buffer_format) {
 				encoder->buf_format = *buffer_format;
@@ -992,8 +991,8 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 					align_virtual_addr =
 					recon_buffers->kernel_virtual_addr +
 					recon_buffers->ysize;
-				DDL_MSG_LOW("Y::KVirt: %p,KPhys: %p"
-							"UV::KVirt: %p,KPhys: %p\n",
+				DDL_MSG_LOW("Y::KVirt: %p, KPhys: %p "\
+					"UV::KVirt: %p, KPhys: %p\n",
 				encoder->hw_bufs.dpb_y[index_hw_bufs].
 				align_virtual_addr,
 				encoder->hw_bufs.dpb_y[index_hw_bufs].
@@ -1003,7 +1002,7 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 				encoder->hw_bufs.dpb_c[index_hw_bufs].
 				align_physical_addr);
 				vcd_status = VCD_S_SUCCESS;
-				}
+			}
 		}
 	}
 	break;
@@ -1058,7 +1057,6 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 		u32 num_mb, num_slices;
 		struct vcd_property_hdr slice_property_hdr;
 		struct vcd_property_meta_data_enable slice_meta_data;
-		slice_meta_data.meta_data_enable_flag = 0;
 		DDL_MSG_HIGH("Set property VCD_I_SLICE_DELIVERY_MODE\n");
 		if (sizeof(u32) == property_hdr->sz &&
 			encoder->codec.codec == VCD_CODEC_H264 &&
@@ -1123,6 +1121,7 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 		break;
 	}
 	case VCD_REQ_PERF_LEVEL:
+		DDL_MSG_LOW("%s: VCD_REQ_PERF_LEVEL (do nithing)", __func__);
 		vcd_status = VCD_S_SUCCESS;
 		break;
 	case VCD_I_ENABLE_DELIMITER_FLAG:
@@ -1153,10 +1152,24 @@ static u32 ddl_set_enc_property(struct ddl_client_context *ddl,
 		}
 		break;
 	}
+	case VCD_I_ENABLE_VUI_BITSTREAM_RESTRICT_FLAG:
+	{
+		struct vcd_property_bitstream_restrict_enable *restrict_enable =
+			(struct vcd_property_bitstream_restrict_enable *)
+				property_value;
+		if (sizeof(struct vcd_property_bitstream_restrict_enable) ==
+			property_hdr->sz &&
+			encoder->codec.codec == VCD_CODEC_H264) {
+			encoder->bitstream_restrict_enable =
+			restrict_enable->bitstream_restrict_enable_flag;
+			vcd_status = VCD_S_SUCCESS;
+		}
+		break;
+	}
 	default:
 		DDL_MSG_ERROR("INVALID ID %d\n", (int)property_hdr->prop_id);
 		vcd_status = VCD_ERR_ILLEGAL_OP;
-	break;
+		break;
 	}
 	return vcd_status;
 }
@@ -1685,6 +1698,15 @@ static u32 ddl_get_enc_property(struct ddl_client_context *ddl,
 			vcd_status = VCD_S_SUCCESS;
 		}
 		break;
+	case VCD_I_ENABLE_VUI_BITSTREAM_RESTRICT_FLAG:
+		if (sizeof(struct vcd_property_bitstream_restrict_enable) ==
+			property_hdr->sz) {
+			((struct vcd_property_bitstream_restrict_enable *)
+				property_value)->bitstream_restrict_enable_flag
+					= encoder->bitstream_restrict_enable;
+			vcd_status = VCD_S_SUCCESS;
+		}
+		break;
 	default:
 		vcd_status = VCD_ERR_ILLEGAL_OP;
 		break;
@@ -1915,7 +1937,7 @@ static void ddl_set_default_enc_rc_params(
 	encoder->rc_level.frame_level_rc = true;
 	encoder->qp_range.min_qp = 0x1;
 	if (codec == VCD_CODEC_H264) {
-		encoder->qp_range.min_qp = 0x1;
+		encoder->qp_range.min_qp = 0x3;
 		encoder->qp_range.max_qp = 0x33;
 		encoder->session_qp.i_frame_qp = 0x14;
 		encoder->session_qp.p_frame_qp = 0x14;
@@ -1984,14 +2006,12 @@ void ddl_set_default_encoder_buffer_req(struct ddl_encoder_data *encoder)
 		encoder->input_buf_req.min_count;
 	encoder->input_buf_req.max_count    = DDL_MAX_BUFFER_COUNT;
 	encoder->input_buf_req.sz = y_cb_cr_size;
-	if ((encoder->buf_format.buffer_format ==
-		VCD_BUFFER_FORMAT_NV12_16M2KA) ||
-		(encoder->buf_format.buffer_format ==
-		VCD_BUFFER_FORMAT_NV21_16M2KA))
+	if (encoder->buf_format.buffer_format ==
+		VCD_BUFFER_FORMAT_NV12_16M2KA)
 		encoder->input_buf_req.align =
 			DDL_LINEAR_BUFFER_ALIGN_BYTES;
-	else if (encoder->buf_format.buffer_format ==
-		VCD_BUFFER_FORMAT_TILE_4x2)
+	else if (VCD_BUFFER_FORMAT_TILE_4x2 ==
+		encoder->buf_format.buffer_format)
 		encoder->input_buf_req.align = DDL_TILE_BUFFER_ALIGN_BYTES;
 	encoder->client_input_buf_req = encoder->input_buf_req;
 	memset(&encoder->output_buf_req , 0 ,
@@ -2002,7 +2022,11 @@ void ddl_set_default_encoder_buffer_req(struct ddl_encoder_data *encoder)
 	encoder->output_buf_req.max_count    = DDL_MAX_BUFFER_COUNT;
 	encoder->output_buf_req.align	= DDL_LINEAR_BUFFER_ALIGN_BYTES;
 	if (y_cb_cr_size >= VCD_DDL_720P_YUV_BUF_SIZE)
-		y_cb_cr_size = y_cb_cr_size>>1;
+#ifdef CONFIG_PANTECH_CAMERA //for recording fail
+		y_cb_cr_size = (y_cb_cr_size * 3) >> 1;
+#else
+		y_cb_cr_size = (y_cb_cr_size * 3) >> 2;
+#endif
 	encoder->output_buf_req.sz =
 		DDL_ALIGN(y_cb_cr_size, DDL_KILO_BYTE(4));
 	ddl_set_default_encoder_metadata_buffer_size(encoder);
